@@ -1,61 +1,57 @@
 import numpy as np
 
 class nb:
-    def __init__(self, X, Y):
-        # Automatically reshape 1D arrays to 2D (samples, 1 feature)
-        if len(X.shape) == 1:
-            self.X = X.reshape(-1, 1)
-        else:
-            self.X = X
-            
-        self.Y = Y
-        self.N = len(Y)
+    def __init__(self):
+        self.classes = None
+        self.prior_prob = None
+        self.u_nj = None
+        self.sigma_nj = None
+
+    def fit(self, X, Y):
+        # Enforce numpy arrays
+        X = np.asarray(X)
+        Y = np.asarray(Y)
+        N = len(Y)
         self.classes = np.unique(Y)
-        
-    def fit(self):
         n_classes = len(self.classes)
-        n_features = self.X.shape[1]
-        
+        n_features = X.shape[1]
+        #Initialisation of parameter arrays
         self.prior_prob = np.zeros(n_classes)
         self.u_nj = np.zeros((n_classes, n_features))
         self.sigma_nj = np.zeros((n_classes, n_features))
         
-        for i in range(n_classes):
-            # Isolate data for class C_j
-            X_i = self.X[self.Y == self.classes[i]]
-            N_j = len(X_i)
+        # Compute epsilon for variance smoothing
+        global_var = np.var(X, axis=0)
+        epsilon = 1e-9 * np.max(global_var) + 1e-9
+        
+        for i, c in enumerate(self.classes):
+            X_i = X[Y == c]
             
             # Phase 1: Prior probability
-            self.prior_prob[i] = N_j / self.N
+            self.prior_prob[i] = len(X_i) / N
             
-            # Phase 2: Parameter Estimation (Mean and Variance per feature)
+            # Phase 2: Parameter Estimation
             self.u_nj[i] = np.mean(X_i, axis=0)
-            self.sigma_nj[i] = np.var(X_i, axis=0) + 1e-9  # Epsilon for numerical stability
+            self.sigma_nj[i] = np.var(X_i, axis=0) + epsilon
 
     def predict(self, X_test):
-        # Automatically reshape 1D test arrays to 2D
-        if len(X_test.shape) == 1:
-            X_test = X_test.reshape(-1, 1)
-            
+        # Enforce numpy arrays
+        X_test = np.asarray(X_test)
         n_samples = X_test.shape[0]
         n_classes = len(self.classes)
-        n_features = X_test.shape[1]
         
-        # Phase 3: Density Calculation
-        log_pdf = np.zeros((n_samples, n_classes, n_features))
+        unnormalized_posterior = np.zeros((n_samples, n_classes))
+        log_prior = np.log(self.prior_prob + 1e-9)
         
+        # Phase 3 & 4: Density Calculation and Classification
         for i in range(n_classes):
             mean = self.u_nj[i]
             var = self.sigma_nj[i]
+            # The constant -0.5 * np.log(2 * np.pi) is removed as it does not affect argmax
+            class_log_likelihood = np.sum(-0.5 * np.log(var) - (0.5 * ((X_test - mean) ** 2) / var), axis=1)
             
-            # Calculate log PDF for each feature independently
-            log_pdf[:, i, :] = -0.5 * np.log(2 * np.pi) - 0.5 * np.log(var) - (0.5 * ((X_test - mean) ** 2) / var)
+            unnormalized_posterior[:, i] = class_log_likelihood + log_prior[i]
             
-        # Phase 4: Posterior Computation and Classification
-        joint_log_likelihood = np.sum(log_pdf, axis=2)
-        log_prior = np.log(self.prior_prob + 1e-9)
-        unnormalized_posterior = joint_log_likelihood + log_prior
-        
         predicted_indices = np.argmax(unnormalized_posterior, axis=1)
         
         return self.classes[predicted_indices]
