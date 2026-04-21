@@ -71,8 +71,8 @@ def new_priors(gamma_var):
 
 def plot_gmm_2d(x, u, s, gamma_var, iteration):
     """
-    Plots the 2D GMM state. Draws scatter points colored by hard assignment
-    and ellipses representing the 2-standard-deviation contour of the covariances.
+    Plots the 2D GMM state. Draws scatter points colored by responsibility (soft assignment)
+    and ellipses representing the 95% confidence interval of the covariances.
     """
     if x.shape[1] != 2:
         print("Plotting skipped: Data is not 2-dimensional.")
@@ -82,12 +82,17 @@ def plot_gmm_2d(x, u, s, gamma_var, iteration):
     ax = plt.gca()
     K = len(u)
     
-    labels = np.argmax(gamma_var, axis=1)
-    colors = plt.cm.get_cmap('tab10')(np.linspace(0, 1, K))
+    # Extract RGB values for K distinct colors (drop the alpha channel)
+    base_colors = plt.get_cmap('tab10')(np.linspace(0, 1, K))[:, :3]
+    
+    # Map responsibilities to colors via dot product: (N, K) @ (K, 3) -> (N, 3)
+    point_colors = np.dot(gamma_var, base_colors)
+    
+    # Plot all data points with soft assignment blending
+    ax.scatter(x[:, 0], x[:, 1], s=15, c=point_colors, alpha=0.7, zorder=1)
 
-    for k in range(K):
-        cluster_points = x[labels == k]
-        ax.scatter(cluster_points[:, 0], cluster_points[:, 1], s=10, color=colors[k], alpha=0.5, zorder=1)
+    # Chi-Square 95% confidence interval multiplier for 2 degrees of freedom
+    scale_factor = 2.4477 
 
     for k in range(K):
         mean = u[k]
@@ -99,7 +104,8 @@ def plot_gmm_2d(x, u, s, gamma_var, iteration):
         
         angle = np.degrees(np.arctan2(*eigenvectors[:, 0][::-1]))
         
-        width, height = 2 * 2 * np.sqrt(eigenvalues)
+        # Calculate width and height using the 95% CI scale factor
+        width, height = 2 * scale_factor * np.sqrt(np.maximum(eigenvalues, 1e-12))
         
         ell = Ellipse(xy=mean, width=width, height=height, angle=angle, 
                       edgecolor='black', facecolor='none', linewidth=2, zorder=2)
@@ -117,7 +123,7 @@ def fit_gmm(x, K, max_iters=100, tol=1e-4, plot_interval=0):
     x: (N, D) array of samples
     K: number of mixture components
     plot_interval: If > 0, plots the GMM state every N iterations. (Requires D=2)
-    gamma: (N,K) array of samples
+    gamma_var: (N, K) array of responsibilities
     """
     N, D = x.shape
     
